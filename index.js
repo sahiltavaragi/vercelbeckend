@@ -1,5 +1,18 @@
 require('dotenv').config()
 
+const requiredEnvVars = [
+  'SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'RAZORPAY_KEY_ID',
+  'RAZORPAY_KEY_SECRET'
+]
+
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar])
+
+if (missingEnvVars.length > 0 && process.env.VERCEL) {
+  console.error(`Missing required environment variables: ${missingEnvVars.join(', ')}`)
+}
+
 const express = require('express')
 const cors = require('cors')
 const app = express()
@@ -46,7 +59,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' })
 })
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`🌱 AgriLink backend running on http://localhost:${PORT}`)
   })
