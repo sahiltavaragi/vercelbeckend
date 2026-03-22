@@ -26,7 +26,19 @@ app.use((req, res, next) => {
   next()
 })
 app.use(cors({
-  origin: [FRONTEND_URL, 'http://localhost:5173', 'http://localhost:5174'],
+  origin: function (origin, callback) {
+    const allowedPatterns = [
+      'localhost',
+      'vercel.app',
+      'render.com'
+    ]
+    
+    if (!origin || allowedPatterns.some(pattern => origin.includes(pattern))) {
+      callback(null, true)
+    } else {
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
   credentials: true,
 }))
 
