@@ -70,9 +70,9 @@ const razorpay = new Razorpay({
 })
 const supabase = require('./lib/supabase')
 
-// Match any path ending in /create-order
-app.post('**/create-order', async (req, res) => {
-  console.log('--- Order Creation Triggered ---', { path: req.path, body: !!req.body })
+// Match any path ending in /create-order (Regex for extreme reliability)
+app.post(/.*\/create-order$/, async (req, res) => {
+  console.log('--- Order Creation Triggered (Regex Match) ---', { path: req.path, url: req.url })
   try {
     const { amount, userId, items, address } = req.body
     if (!amount || !userId) {
@@ -104,7 +104,7 @@ app.post('**/create-order', async (req, res) => {
   }
 })
 
-// Normal Routers (for other routes)
+// Normal Routers
 app.use('/api/payment', require('./routes/payment'))
 app.use('/api/orders', require('./routes/orders'))
 
@@ -126,9 +126,14 @@ app.get('/', (req, res) => {
   res.json({ message: 'AgriLink backend API is running 🚀' })
 })
 
-// 404 handler
+// 404 handler with Path Logging
 app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' })
+  console.log(`[404] Route Not Found: ${req.method} ${req.url}`)
+  res.status(404).json({ 
+    error: 'Route not found', 
+    requestedPath: req.url,
+    method: req.method 
+  })
 })
 
 // Error handler
