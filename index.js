@@ -56,17 +56,47 @@ app.use(cors({
 app.use('/api/payment/webhook', express.raw({ type: 'application/json' }))
 app.use(express.json())
 
-// Routes
-const paymentRoutes = require('./routes/payment')
-const orderRoutes = require('./routes/orders')
-
-app.use('/api/payment', paymentRoutes)
-app.use('/api/orders', orderRoutes)
-
-// Testing route to verify indexing
-app.get('/test-route', (req, res) => {
-  res.json({ message: 'Routing is working!' })
+// Consolidated Logic for /api/payment/create-order (Moving here to bypass mysterious routing issues)
+const Razorpay = require('razorpay')
+const razorpay = new Razorpay({
+  key_id: (process.env.RAZORPAY_KEY_ID || '').trim(),
+  key_secret: (process.env.RAZORPAY_KEY_SECRET || '').trim(),
 })
+const supabase = require('./lib/supabase')
+
+app.post('/api/payment/create-order', async (req, res) => {
+  console.log('--- Direct Create Order Request ---', req.body)
+  try {
+    const { amount, userId, items, address } = req.body
+    if (!amount || !userId) return res.status(400).json({ message: 'Amount and userId are required' })
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(Number(amount) * 100),
+      currency: 'INR',
+      receipt: `receipt_${Date.now()}`,
+      notes: { userId: userId.toString() },
+    })
+
+    await supabase.from('orders').insert({
+      user_id: userId,
+      total_amount: amount,
+      status: 'pending',
+      payment_method: 'razorpay',
+      payment_status: 'pending',
+      razorpay_order_id: order.id,
+      delivery_address: address,
+    })
+
+    res.json(order)
+  } catch (err) {
+    console.error('--- Direct Payment Error ---', err.message)
+    res.status(500).json({ message: 'Payment error', error: err.message })
+  }
+})
+
+// Normal Routers (for other routes)
+app.use('/api/payment', require('./routes/payment'))
+app.use('/api/orders', require('./routes/orders'))
 
 // Health check
 app.get('/health', (req, res) => {
