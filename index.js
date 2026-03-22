@@ -57,17 +57,33 @@ app.use('/api/payment/webhook', express.raw({ type: 'application/json' }))
 app.use(express.json())
 
 // Routes
-app.use('/api/payment', require('./routes/payment'))
-app.use('/api/orders', require('./routes/orders'))
+const paymentRoutes = require('./routes/payment')
+const orderRoutes = require('./routes/orders')
+
+app.use('/api/payment', paymentRoutes)
+app.use('/api/orders', orderRoutes)
+
+// Testing route to verify indexing
+app.get('/test-route', (req, res) => {
+  res.json({ message: 'Routing is working!' })
+})
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'AgriLink backend is running 🌱' })
+  res.json({ 
+    status: 'OK', 
+    message: 'AgriLink backend is running 🌱',
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      VERCEL: !!process.env.VERCEL,
+      PORT: process.env.PORT
+    }
+  })
 })
 
 // Root route
 app.get('/', (req, res) => {
-  res.json({ message: 'AgriLink backend API is running 🚀. Please use the frontend app to interact with the system.' })
+  res.json({ message: 'AgriLink backend API is running 🚀' })
 })
 
 // 404 handler
