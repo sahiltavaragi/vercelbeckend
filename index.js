@@ -25,15 +25,25 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`)
   next()
 })
+// Manual CORS headers for extra reliability
+app.use((req, res, next) => {
+  const origin = req.headers.origin
+  if (origin && (origin.includes('vercel.app') || origin.includes('localhost') || origin.includes('render.com'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE')
+  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,Content-Type,Authorization')
+  res.setHeader('Access-Control-Allow-Credentials', 'true')
+  
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end()
+  }
+  next()
+})
+
 app.use(cors({
   origin: function (origin, callback) {
-    const allowedPatterns = [
-      'localhost',
-      'vercel.app',
-      'render.com'
-    ]
-    
-    if (!origin || allowedPatterns.some(pattern => origin.includes(pattern))) {
+    if (!origin || origin.includes('vercel.app') || origin.includes('localhost') || origin.includes('render.com')) {
       callback(null, true)
     } else {
       callback(new Error('Not allowed by CORS'))
