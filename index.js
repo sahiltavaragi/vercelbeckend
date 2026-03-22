@@ -56,7 +56,13 @@ app.use(cors({
 app.use('/api/payment/webhook', express.raw({ type: 'application/json' }))
 app.use(express.json())
 
-// Consolidated Logic for /api/payment/create-order (Moving here to bypass mysterious routing issues)
+// --- GLOBAL DEBUG LOGGING ---
+app.use((req, res, next) => {
+  console.log(`[DEBUG] Received ${req.method} request to: "${req.url}" (Path: "${req.path}")`)
+  next()
+})
+
+// Consolidated Logic for /api/payment/create-order (Wildcard match to bypass path issues)
 const Razorpay = require('razorpay')
 const razorpay = new Razorpay({
   key_id: (process.env.RAZORPAY_KEY_ID || '').trim(),
@@ -64,11 +70,15 @@ const razorpay = new Razorpay({
 })
 const supabase = require('./lib/supabase')
 
-app.post('/api/payment/create-order', async (req, res) => {
-  console.log('--- Direct Create Order Request ---', req.body)
+// Match any path ending in /create-order
+app.post('**/create-order', async (req, res) => {
+  console.log('--- Order Creation Triggered ---', { path: req.path, body: !!req.body })
   try {
     const { amount, userId, items, address } = req.body
-    if (!amount || !userId) return res.status(400).json({ message: 'Amount and userId are required' })
+    if (!amount || !userId) {
+      console.warn('Missing amount or userId in request body', req.body)
+      return res.status(400).json({ message: 'Amount and userId are required' })
+    }
 
     const order = await razorpay.orders.create({
       amount: Math.round(Number(amount) * 100),
@@ -89,7 +99,7 @@ app.post('/api/payment/create-order', async (req, res) => {
 
     res.json(order)
   } catch (err) {
-    console.error('--- Direct Payment Error ---', err.message)
+    console.error('--- Payment Processing Error ---', err.message)
     res.status(500).json({ message: 'Payment error', error: err.message })
   }
 })
