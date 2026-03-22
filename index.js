@@ -59,12 +59,14 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' })
 })
 
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+// On Vercel, the app is exported and handled by the builder.
+// On Render, Docker, or local machines, we need to call app.listen.
+if (process.env.VERCEL) {
+  module.exports = app
+} else {
   app.listen(PORT, () => {
-    console.log(`🌱 AgriLink backend running on http://localhost:${PORT}`)
+    console.log(`🌱 AgriLink backend running on port ${PORT}`)
   })
 }
-
-module.exports = app
 
 
