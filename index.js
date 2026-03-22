@@ -1,20 +1,10 @@
 require('dotenv').config()
-
-const requiredEnvVars = [
-  'SUPABASE_URL',
-  'SUPABASE_SERVICE_ROLE_KEY',
-  'RAZORPAY_KEY_ID',
-  'RAZORPAY_KEY_SECRET'
-]
-
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar])
-
-if (missingEnvVars.length > 0 && process.env.VERCEL) {
-  console.error(`Missing required environment variables: ${missingEnvVars.join(', ')}`)
-}
-
 const express = require('express')
 const cors = require('cors')
+const crypto = require('crypto')
+const Razorpay = require('razorpay')
+const supabase = require('./lib/supabase')
+
 const app = express()
 
 const PORT = process.env.PORT || 5000
@@ -62,13 +52,10 @@ app.use((req, res, next) => {
   next()
 })
 
-// Consolidated Logic for /api/payment/create-order (Wildcard match to bypass path issues)
-const Razorpay = require('razorpay')
 const razorpay = new Razorpay({
   key_id: (process.env.RAZORPAY_KEY_ID || '').trim(),
   key_secret: (process.env.RAZORPAY_KEY_SECRET || '').trim(),
 })
-const supabase = require('./lib/supabase')
 
 // --- UNIVERSAL PATH CATCHER (Ultimate 404 Fix) ---
 app.post('*', async (req, res, next) => {
@@ -108,36 +95,41 @@ app.post('*', async (req, res, next) => {
 
   // Match Verify
   if (url.endsWith('/verify')) {
-    console.log('--- Payment Verification Triggered (Universal) ---')
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, userId, items, address } = req.body
+    console.log('--- Payment Verification Triggered (Universal) ---', req.body)
+    try {
+      const { razorpay_order_id, razorpay_payment_id, razorpay_signature, userId, items, address } = req.body
+      if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+        console.error('Missing Razorpay verification fields', req.body)
+        return res.status(400).json({ success: false, message: 'Missing verification fields' })
+      }
 
-    const body = razorpay_order_id + "|" + razorpay_payment_id
-    const expectedSignature = crypto
-      .createHmac('sha256', (process.env.RAZORPAY_KEY_SECRET || '').trim())
-      .update(body.toString())
-      .digest('hex')
+      const body = razorpay_order_id + "|" + razorpay_payment_id
+      const expectedSignature = crypto
+        .createHmac('sha256', (process.env.RAZORPAY_KEY_SECRET || '').trim())
+        .update(body.toString())
+        .digest('hex')
 
-    if (expectedSignature === razorpay_signature) {
-      try {
-        const { data: ord } = await supabase.from('orders').select('id').eq('razorpay_order_id', razorpay_order_id).single()
-        if (ord) {
-          await supabase.from('orders').update({ payment_status: 'paid', status: 'confirmed', razorpay_payment_id, razorpay_signature }).eq('id', ord.id)
-          if (items && items.length > 0) {
-            const orderItems = items.map(item => ({ order_id: ord.id, product_id: item.id, seller_id: item.seller_id, quantity: item.quantity, price_at_time: item.price }))
-            await supabase.from('order_items').insert(orderItems)
-            for (const item of items) {
-              const { data: prod } = await supabase.from('products').select('quantity').eq('id', item.id).single()
-              if (prod) await supabase.from('products').update({ quantity: Math.max(0, prod.quantity - item.quantity) }).eq('id', item.id)
+      if (expectedSignature === razorpay_signature) {
+          const { data: ord } = await supabase.from('orders').select('id').eq('razorpay_order_id', razorpay_order_id).single()
+          if (ord) {
+            await supabase.from('orders').update({ payment_status: 'paid', status: 'confirmed', razorpay_payment_id, razorpay_signature }).eq('id', ord.id)
+            if (items && items.length > 0) {
+              const orderItems = items.map(item => ({ order_id: ord.id, product_id: item.id, seller_id: item.seller_id, quantity: item.quantity, price_at_time: item.price }))
+              await supabase.from('order_items').insert(orderItems)
+              for (const item of items) {
+                const { data: prod } = await supabase.from('products').select('quantity').eq('id', item.id).single()
+                if (prod) await supabase.from('products').update({ quantity: Math.max(0, prod.quantity - item.quantity) }).eq('id', item.id)
+              }
             }
           }
-        }
-        return res.json({ success: true, message: 'Payment verified successfully' })
-      } catch (err) {
-        console.error('Verification error:', err)
-        return res.status(500).json({ success: false, message: 'Verification error' })
+          return res.json({ success: true, message: 'Payment verified successfully' })
+      } else {
+        console.warn('Invalid signature detected')
+        return res.status(400).json({ success: false, message: 'Invalid signature' })
       }
-    } else {
-      return res.status(400).json({ success: false, message: 'Invalid signature' })
+    } catch (err) {
+      console.error('CRITICAL Verification error:', err.message)
+      return res.status(500).json({ success: false, message: 'Verification crashed', error: err.message })
     }
   }
 
@@ -149,12 +141,12 @@ app.post('*', async (req, res, next) => {
 app.use('/api/payment', require('./routes/payment'))
 app.use('/api/orders', require('./routes/orders'))
 
-// Health check (v3)
+// Health check (v3.1.0)
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    version: '3.0.0',
-    fix: 'universal-catcher',
+    version: '3.1.0',
+    fix: 'robust-verify-logic',
     env: {
       NODE_ENV: process.env.NODE_ENV,
       PORT: process.env.PORT
