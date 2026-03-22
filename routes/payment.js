@@ -9,6 +9,16 @@ const razorpay = new Razorpay({
   key_secret: (process.env.RAZORPAY_KEY_SECRET || '').trim(),
 })
 
+// GET /api/payment/test
+router.get('/test', (req, res) => {
+  res.json({ message: 'Payment router GET /test is working' })
+})
+
+// POST /api/payment/test-post
+router.post('/test-post', (req, res) => {
+  res.json({ message: 'Payment router POST /test-post is working', body: req.body })
+})
+
 // POST /api/payment/create-order
 router.post('/create-order', async (req, res) => {
   console.log('--- Create Order Request ---', req.body)
