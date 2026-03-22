@@ -75,10 +75,7 @@ app.post(/.*\/create-order$/, async (req, res) => {
   console.log('--- Order Creation Triggered (Regex Match) ---', { path: req.path, url: req.url })
   try {
     const { amount, userId, items, address } = req.body
-    if (!amount || !userId) {
-      console.warn('Missing amount or userId in request body', req.body)
-      return res.status(400).json({ message: 'Amount and userId are required' })
-    }
+    if (!amount || !userId) return res.status(400).json({ message: 'Amount and userId are required' })
 
     const order = await razorpay.orders.create({
       amount: Math.round(Number(amount) * 100),
@@ -101,6 +98,42 @@ app.post(/.*\/create-order$/, async (req, res) => {
   } catch (err) {
     console.error('--- Payment Processing Error ---', err.message)
     res.status(500).json({ message: 'Payment error', error: err.message })
+  }
+})
+
+const crypto = require('crypto')
+app.post(/.*\/verify$/, async (req, res) => {
+  console.log('--- Payment Verification Triggered ---', req.body)
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, userId, items, address } = req.body
+
+  const body = razorpay_order_id + "|" + razorpay_payment_id
+  const expectedSignature = crypto
+    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+    .update(body.toString())
+    .digest('hex')
+
+  if (expectedSignature === razorpay_signature) {
+    try {
+      // Logic from payment.js
+      const { data: ord } = await supabase.from('orders').select('id').eq('razorpay_order_id', razorpay_order_id).single()
+      if (ord) {
+        await supabase.from('orders').update({ payment_status: 'paid', status: 'confirmed', razorpay_payment_id, razorpay_signature }).eq('id', ord.id)
+        if (items && items.length > 0) {
+          const orderItems = items.map(item => ({ order_id: ord.id, product_id: item.id, seller_id: item.seller_id, quantity: item.quantity, price_at_time: item.price }))
+          await supabase.from('order_items').insert(orderItems)
+          for (const item of items) {
+            const { data: prod } = await supabase.from('products').select('quantity').eq('id', item.id).single()
+            if (prod) await supabase.from('products').update({ quantity: Math.max(0, prod.quantity - item.quantity) }).eq('id', item.id)
+          }
+        }
+      }
+      res.json({ success: true, message: 'Payment verified successfully' })
+    } catch (err) {
+      console.error('Verification error:', err)
+      res.status(500).json({ success: false, message: 'Verification error' })
+    }
+  } else {
+    res.status(400).json({ success: false, message: 'Invalid signature' })
   }
 })
 
