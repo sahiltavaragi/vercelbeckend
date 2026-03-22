@@ -70,85 +70,93 @@ const razorpay = new Razorpay({
 })
 const supabase = require('./lib/supabase')
 
-// Match any path ending in /create-order (Regex for extreme reliability)
-app.post(/.*\/create-order$/, async (req, res) => {
-  console.log('--- Order Creation Triggered (Regex Match) ---', { path: req.path, url: req.url })
-  try {
-    const { amount, userId, items, address } = req.body
-    if (!amount || !userId) return res.status(400).json({ message: 'Amount and userId are required' })
+// --- UNIVERSAL PATH CATCHER (Ultimate 404 Fix) ---
+app.post('*', async (req, res, next) => {
+  const url = req.url
+  console.log(`[ROUTE-CATCHER] Method: ${req.method}, URL: ${url}`)
 
-    const order = await razorpay.orders.create({
-      amount: Math.round(Number(amount) * 100),
-      currency: 'INR',
-      receipt: `receipt_${Date.now()}`,
-      notes: { userId: userId.toString() },
-    })
-
-    await supabase.from('orders').insert({
-      user_id: userId,
-      total_amount: amount,
-      status: 'pending',
-      payment_method: 'razorpay',
-      payment_status: 'pending',
-      razorpay_order_id: order.id,
-      delivery_address: address,
-    })
-
-    res.json(order)
-  } catch (err) {
-    console.error('--- Payment Processing Error ---', err.message)
-    res.status(500).json({ message: 'Payment error', error: err.message })
-  }
-})
-
-const crypto = require('crypto')
-app.post(/.*\/verify$/, async (req, res) => {
-  console.log('--- Payment Verification Triggered ---', req.body)
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, userId, items, address } = req.body
-
-  const body = razorpay_order_id + "|" + razorpay_payment_id
-  const expectedSignature = crypto
-    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-    .update(body.toString())
-    .digest('hex')
-
-  if (expectedSignature === razorpay_signature) {
+  // Match Create Order
+  if (url.endsWith('/create-order')) {
+    console.log('--- Order Creation Triggered (Universal) ---')
     try {
-      // Logic from payment.js
-      const { data: ord } = await supabase.from('orders').select('id').eq('razorpay_order_id', razorpay_order_id).single()
-      if (ord) {
-        await supabase.from('orders').update({ payment_status: 'paid', status: 'confirmed', razorpay_payment_id, razorpay_signature }).eq('id', ord.id)
-        if (items && items.length > 0) {
-          const orderItems = items.map(item => ({ order_id: ord.id, product_id: item.id, seller_id: item.seller_id, quantity: item.quantity, price_at_time: item.price }))
-          await supabase.from('order_items').insert(orderItems)
-          for (const item of items) {
-            const { data: prod } = await supabase.from('products').select('quantity').eq('id', item.id).single()
-            if (prod) await supabase.from('products').update({ quantity: Math.max(0, prod.quantity - item.quantity) }).eq('id', item.id)
+      const { amount, userId, items, address } = req.body
+      if (!amount || !userId) return res.status(400).json({ message: 'Amount and userId are required' })
+
+      const order = await razorpay.orders.create({
+        amount: Math.round(Number(amount) * 100),
+        currency: 'INR',
+        receipt: `receipt_${Date.now()}`,
+        notes: { userId: userId.toString() },
+      })
+
+      await supabase.from('orders').insert({
+        user_id: userId,
+        total_amount: amount,
+        status: 'pending',
+        payment_method: 'razorpay',
+        payment_status: 'pending',
+        razorpay_order_id: order.id,
+        delivery_address: address,
+      })
+
+      return res.json(order)
+    } catch (err) {
+      console.error('--- Payment Processing Error ---', err.message)
+      return res.status(500).json({ message: 'Payment error', error: err.message })
+    }
+  }
+
+  // Match Verify
+  if (url.endsWith('/verify')) {
+    console.log('--- Payment Verification Triggered (Universal) ---')
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, userId, items, address } = req.body
+
+    const body = razorpay_order_id + "|" + razorpay_payment_id
+    const expectedSignature = crypto
+      .createHmac('sha256', (process.env.RAZORPAY_KEY_SECRET || '').trim())
+      .update(body.toString())
+      .digest('hex')
+
+    if (expectedSignature === razorpay_signature) {
+      try {
+        const { data: ord } = await supabase.from('orders').select('id').eq('razorpay_order_id', razorpay_order_id).single()
+        if (ord) {
+          await supabase.from('orders').update({ payment_status: 'paid', status: 'confirmed', razorpay_payment_id, razorpay_signature }).eq('id', ord.id)
+          if (items && items.length > 0) {
+            const orderItems = items.map(item => ({ order_id: ord.id, product_id: item.id, seller_id: item.seller_id, quantity: item.quantity, price_at_time: item.price }))
+            await supabase.from('order_items').insert(orderItems)
+            for (const item of items) {
+              const { data: prod } = await supabase.from('products').select('quantity').eq('id', item.id).single()
+              if (prod) await supabase.from('products').update({ quantity: Math.max(0, prod.quantity - item.quantity) }).eq('id', item.id)
+            }
           }
         }
+        return res.json({ success: true, message: 'Payment verified successfully' })
+      } catch (err) {
+        console.error('Verification error:', err)
+        return res.status(500).json({ success: false, message: 'Verification error' })
       }
-      res.json({ success: true, message: 'Payment verified successfully' })
-    } catch (err) {
-      console.error('Verification error:', err)
-      res.status(500).json({ success: false, message: 'Verification error' })
+    } else {
+      return res.status(400).json({ success: false, message: 'Invalid signature' })
     }
-  } else {
-    res.status(400).json({ success: false, message: 'Invalid signature' })
   }
+
+  // If not matched, go to next
+  next()
 })
 
 // Normal Routers
 app.use('/api/payment', require('./routes/payment'))
 app.use('/api/orders', require('./routes/orders'))
 
-// Health check
+// Health check (v3)
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'AgriLink backend is running 🌱',
+    version: '3.0.0',
+    fix: 'universal-catcher',
     env: {
       NODE_ENV: process.env.NODE_ENV,
-      VERCEL: !!process.env.VERCEL,
       PORT: process.env.PORT
     }
   })
