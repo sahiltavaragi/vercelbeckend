@@ -64,18 +64,22 @@ app.post('*', async (req, res, next) => {
 
   // Match Create Order
   if (url.endsWith('/create-order')) {
-    console.log('--- Order Creation Triggered (Universal) ---')
+    const startTime = Date.now()
+    console.log('--- Order Creation Triggered (Universal) ---', { body: req.body })
     try {
       const { amount, userId, items, address } = req.body
       if (!amount || !userId) return res.status(400).json({ message: 'Amount and userId are required' })
 
+      console.log(`[PERF] Starting Razorpay order creation for User: ${userId}`)
       const order = await razorpay.orders.create({
         amount: Math.round(Number(amount) * 100),
         currency: 'INR',
         receipt: `receipt_${Date.now()}`,
         notes: { userId: userId.toString() },
       })
+      console.log(`[PERF] Razorpay order created in ${Date.now() - startTime}ms: ${order.id}`)
 
+      const dbStart = Date.now()
       await supabase.from('orders').insert({
         user_id: userId,
         total_amount: amount,
@@ -85,7 +89,9 @@ app.post('*', async (req, res, next) => {
         razorpay_order_id: order.id,
         delivery_address: address,
       })
+      console.log(`[PERF] Supabase order inserted in ${Date.now() - dbStart}ms`)
 
+      console.log(`[PERF] Total /create-order time: ${Date.now() - startTime}ms`)
       return res.json(order)
     } catch (err) {
       console.error('--- Payment Processing Error ---', err.message)
